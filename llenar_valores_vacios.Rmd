@@ -1,0 +1,84 @@
+---
+title: 'CropX: Cómo rellenar campos vacíos usando el promedio de los valores más cercanos'
+author: "Sergio Escalante"
+date: "21/4/2020"
+output:
+  prettydoc::html_pretty:
+    toc: true
+    df_print: paged
+    highlight: github
+    theme: cayman
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(dplyr)
+library(zoo)
+```
+
+Este es un ensayo para demostrar cómo usar el promedio de los valores más cercanos a un campo vacío. Esto sucede cuando se descargan datos de un sensor CropX. Es posible asignar un valor a un campo vacío si se necesita que todo el conjunto de datos tenga las mismas dimensiones.
+
+Los datos vienen de un sensor CropX instalado en una parcela de docencia de la Estación Experimental Agrícola Fabio Baudrit en La Garita, Alajuela.
+
+El archivo *cpxempty.csv* es el producto de agarrar la descarga original del sensor y eliminar las primeras filas. Deben quedar como primera fila en el archivo los nombres de los parámetros que mide la sonda. Este paso es muy importante.
+
+Estudiemos la estructura del conjunto de datos:
+
+```{r}
+cropx <- as.data.frame(read.csv2("cpxempty.csv", header = T))
+head(cropx)
+```
+
+En algunos índices hay campos de humedad, temperatura o EC vacíos.
+
+```{r}
+(moist.data <- cropx %>% 
+   select(Moisture.20.0) %>% 
+   summarise(sum_na = sum(is.na(Moisture.20.0)), 
+             sum_notna = sum(!is.na(Moisture.20.0)), 
+             total = length(Moisture.20.0)))
+```
+
+Solo el parámetro *Date*(fecha) es de carácter factorial y el resto son variables numéricas.
+
+```{r}
+str(cropx)
+```
+
+## Paso importante para usar en futuras descargas
+
+La siguiente ejecución utiliza el repositorio `zoo` para agarrar un vector, encontrar NAs y reemplazarla con el promedio entre el valor más anterior y el que le sigue, siempre y cuándo estos no sean NA. La función no se le puede aplicar a la variable `Date` porque esta es de clase factorial, de manera que la función la va a rechazar. Solo se permiten valores de clase `integer`.
+
+```{r}
+contiguous_mean <- function(vec) {
+    return( (zoo::na.locf(vec) + zoo::na.locf(vec, fromLast = TRUE)) / 2 )
+}
+
+modified_cropx <- as.data.frame(apply(cropx[,2:7], 2, contiguous_mean))
+```
+
+Ahora se le añade la columna de fechas al producto del rellenado:
+```{r}
+fecha <- cropx %>% select(Date)
+
+modified_cropx <- cbind.data.frame(fecha,modified_cropx)
+
+head(modified_cropx)
+```
+
+
+Por último se revisa si después del procedimiento se encuentran NAs en el conjunto de datos:
+
+```{r}
+any(is.na(modified_cropx))
+```
+
+Una vez que el conjunto de datos queda corregido se pueden guardar en un archivo separado por comas para otros usos:
+
+```{r}
+write.csv(modified_cropx,"C:\\Users\\sescalante\\Documents\\datos_corregidos.csv", row.names = FALSE)
+```
+
+Recordar que el archivo con los datos descargados originalmente del sensor tiene que estar en el mismo directorio con el que se trabaja la sesión en Rstudio.
